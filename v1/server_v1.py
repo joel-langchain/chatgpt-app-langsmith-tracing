@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import date
 
 from dotenv import load_dotenv
 
@@ -76,24 +77,50 @@ def search_holidays(
     }
 
 
+def _unknown_id(holiday_id: str) -> dict:
+    """A miss is an answer, not a failure.
+
+    Raising would reach the model as an opaque error, and on the trace as a failed run
+    with no reason on it, so an id that does not exist comes back as a normal result
+    saying which ids do. Same reasoning as the no-match branch of search_holidays.
+    """
+    return {
+        "found": False,
+        "requested_id": holiday_id,
+        "no_match_reason": f"No holiday has the id {holiday_id}. Ids look like HOL-1041.",
+        "available_ids": [h["id"] for h in _HOLIDAYS],
+    }
+
+
 @mcp.tool()
 def get_holiday(holiday_id: str) -> dict:
-    """Return the full record for one holiday by id."""
+    """Return the full record for one holiday by id.
+
+    An id that does not exist is a normal result saying so, not an exception.
+    """
     for h in _HOLIDAYS:
         if h["id"] == holiday_id:
-            return {**h, "includes": ["Return flights from London", "Hotel", "23kg baggage"]}
-    raise ValueError(f"No holiday with id {holiday_id!r}")
+            return {"found": True, **h, "includes": ["Return flights from London", "Hotel", "23kg baggage"]}
+    return _unknown_id(holiday_id)
 
 
 @mcp.tool()
 def check_availability(holiday_id: str, departure_date: str) -> dict:
-    """Check whether a holiday can depart on a given ISO date. Returns seats left and the live price."""
+    """Check whether a holiday can depart on a given ISO date. Returns seats left and the live price.
+
+    An unknown id comes back as a normal result, the same as get_holiday. A departure_date
+    that is not an ISO date does raise, because a malformed argument is a broken call rather
+    than an answer, and that is the distinction worth drawing on a trace.
+    """
     base = next((h for h in _HOLIDAYS if h["id"] == holiday_id), None)
     if base is None:
-        raise ValueError(f"No holiday with id {holiday_id!r}")
-    day = int(departure_date[-2:])
+        return _unknown_id(holiday_id)
+    try:
+        day = date.fromisoformat(departure_date).day
+    except ValueError as exc:
+        raise ValueError(f"departure_date must be an ISO date like 2026-10-14, got {departure_date!r}") from exc
     seats = (day * 7) % 9
-    return {"holiday_id": holiday_id, "departure_date": departure_date, "available": seats > 0, "seats_left": seats, "price_gbp": base["price_gbp"] + (day % 5) * 15}
+    return {"found": True, "holiday_id": holiday_id, "departure_date": departure_date, "available": seats > 0, "seats_left": seats, "price_gbp": base["price_gbp"] + (day % 5) * 15}
 
 
 # Tracing last, after the tools exist, so the wrapper sees the real call_tool handler.

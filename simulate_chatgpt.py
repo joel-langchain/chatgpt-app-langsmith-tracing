@@ -8,6 +8,10 @@ without publishing anything to ChatGPT.
 Two conversations, two users, several tool calls each. In LangSmith each tool
 call is one trace, and the traces of one conversation share a thread.
 
+The second conversation asks for an id that does not exist, which comes back as a
+normal result, and then sends a malformed date, which does not. Only the second of
+those is an error run.
+
 Run (with server.py already running):
     uv run simulate_chatgpt.py
 """
@@ -58,7 +62,9 @@ CONVERSATIONS = [
              "customer_request": "Malaga on a budget, nothing over 900"}),
             ("search_holidays", {"destination": "Lisbon", "max_price_gbp": 900,
              "customer_request": "cheapest Lisbon option they have"}),
-            ("get_holiday", {"holiday_id": "HOL-9999"}),  # bad id -> tool error, should show as an error run
+            ("get_holiday", {"holiday_id": "HOL-9999"}),  # unknown id -> a normal result naming the ids that exist
+            # malformed argument rather than a miss -> a real failure, so one run shows as an error
+            ("check_availability", {"holiday_id": "HOL-2210", "departure_date": "next Tuesday"}),
         ],
     ),
 ]
@@ -75,7 +81,7 @@ async def main() -> None:
                 flag = "ERROR" if res.is_error else "ok"
                 body = res.structured_content if res.structured_content is not None else [c.model_dump() for c in res.content]
                 print(f"  {tool}({args}) -> {flag} {str(body)[:110]}")
-    print("\nDone. Check LangSmith project", os.environ.get("LANGSMITH_PROJECT"), "in a few seconds.")
+    print("\nDone. Check LangSmith project", os.environ.get("LANGSMITH_PROJECT") or "default", "in a few seconds.")
 
 
 if __name__ == "__main__":

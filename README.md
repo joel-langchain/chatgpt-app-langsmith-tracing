@@ -32,6 +32,8 @@ The SDK also spans `initialize`, `tools/list`, and `server/discover`. ChatGPT se
 
 A tool that fails returns a normal result with `isError: true`. LangSmith marks a run as failed from an `exception` event, so the middleware adds one carrying the error text ChatGPT received. Without it a failed tool call looks successful.
 
+That text is all there is. SDK 2.x masks a raised exception as `Error executing tool <name>` before it leaves the server, so the reason is on your own stderr and not on the trace. 1.x appends the exception message. Neither is something the middleware can recover, which is the second reason a tool should return a miss rather than raise on one.
+
 Inputs and outputs are chat messages rather than the raw argument and result JSON, which is a requirement of thread-level evaluation, covered below. Two readers need different things from those messages, so the user turn carries the customer's own words followed by the arguments that were actually sent, and the assistant turn carries the tool's own return value rather than the MCP envelope around it. A judge gets the intent, and anyone debugging still sees the parameters. The untouched argument and result JSON is on the run as `tool_arguments` and `tool_result` metadata either way.
 
 ## Run it
@@ -51,7 +53,7 @@ uv sync --extra harness
 uv run model_harness.py
 ```
 
-`simulate_chatgpt.py` plays two conversations from two users, several tool calls each, with the `_meta` ChatGPT would send. The last call uses a bad id so one run shows as an error.
+`simulate_chatgpt.py` plays two conversations from two users, several tool calls each, with the `_meta` ChatGPT would send. The second conversation asks for an id that does not exist, which comes back as a normal result, and then sends a malformed date, which is the one run that shows as an error.
 
 ## What you see in LangSmith
 
@@ -79,7 +81,7 @@ Do not use the `Mcp-Session-Id` HTTP header as the conversation key. It was remo
 
 ## Tool responses shape what the agent can say
 
-`search_holidays` does not return a bare empty list when nothing matches. It returns why the search missed and the closest package it does have.
+None of the three tools raises on a miss. `search_holidays` does not return a bare empty list when nothing matches, and `get_holiday` and `check_availability` do not raise on an id that does not exist. Each returns why it missed and what it does have.
 
 ```json
 {
@@ -90,7 +92,18 @@ Do not use the `Mcp-Session-Id` HTTP header as the conversation key. It was remo
 }
 ```
 
+```json
+{
+  "found": false,
+  "requested_id": "HOL-9999",
+  "no_match_reason": "No holiday has the id HOL-9999. Ids look like HOL-1041.",
+  "available_ids": ["HOL-1041", "HOL-2210", "HOL-3305", "HOL-4120"]
+}
+```
+
 An empty list gives the model nothing, so the customer gets a dead end. With a reason and a near miss the model can explain the gap and offer the alternative. This matters more for a ChatGPT app than for an agent you run yourself, because the tool response is the only thing you control once the conversation is on OpenAI's side. It is also visible on the trace, so the quality of these responses is something you can evaluate rather than guess at.
+
+A malformed argument is the case that should still raise. `check_availability` rejects a `departure_date` that is not an ISO date, because that is a broken call rather than an answer, and the trace is more useful when a failed run means something went wrong instead of meaning a customer asked for something we do not sell.
 
 ## Evaluating a whole conversation
 
