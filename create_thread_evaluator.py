@@ -7,17 +7,19 @@ It needs the project's traces to carry a top-level `messages` key on inputs and
 outputs, which is what `langsmith_tracing.py` emits. Without that the thread
 cannot be assembled and the evaluator will not run.
 
+A thread is scored once it has been idle, ten minutes by default. Pass --idle-seconds
+to shorten that, 120 being the minimum the platform accepts. To score a thread without
+waiting at all, trigger the rule by hand, which the script prints the command for.
+
 Run:
-    uv run create_thread_evaluator.py                      # live only
-    uv run create_thread_evaluator.py --backfill-hours 24   # also score existing threads
+    uv run create_thread_evaluator.py
+    uv run create_thread_evaluator.py --idle-seconds 120
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-from datetime import datetime, timedelta, timezone
-
 import httpx
 from dotenv import load_dotenv
 
@@ -71,7 +73,12 @@ def main() -> None:
     ap.add_argument("--name", default="thread-served-customer-request")
     ap.add_argument("--model", default="gpt-4.1-mini")
     ap.add_argument("--sampling-rate", type=float, default=1.0)
-    ap.add_argument("--backfill-hours", type=int, default=0, help="also score threads idle within this many hours")
+    ap.add_argument(
+        "--idle-seconds",
+        type=int,
+        default=0,
+        help="set the project's thread idle window, minimum 120. 0 leaves it unchanged.",
+    )
     ap.add_argument("--spend-limit-usd", type=float, default=1.0)
     args = ap.parse_args()
 
@@ -102,10 +109,12 @@ def main() -> None:
                 }
             ],
         }
-        if args.backfill_hours:
-            body["backfill_from"] = (
-                datetime.now(timezone.utc) - timedelta(hours=args.backfill_hours)
-            ).isoformat()
+        if args.idle_seconds:
+            # The idle window is a project setting shared by every thread rule on it.
+            http.patch(
+                f"/api/v1/sessions/{session_id}",
+                json={"extra": {"thread_idle_seconds": str(max(args.idle_seconds, 120))}},
+            ).raise_for_status()
 
         r = http.post("/api/v1/runs/rules", json=body)
         if r.status_code >= 400:
@@ -118,10 +127,11 @@ def main() -> None:
     print(f"  project      {rule.get('session_name')}")
     print(f"  group_by     {rule.get('group_by')}")
     print(f"  feedback key {rule.get('evaluator_name') or args.name}")
-    if rule.get("backfill_id"):
-        print(f"  backfill     {rule['backfill_id']} status {rule.get('backfill_status')}")
-    print("\nThreads are scored once idle, 10 minutes by default. Feedback lands on one")
-    print("representative trace per thread, not on every tool call in it.")
+    print("\nA thread is scored once it has been idle. Feedback lands on one representative")
+    print("trace per thread, not on every tool call in it, so view it with ?runview=threads.")
+    print("\nTo score the threads already in the project, trigger the rule now:")
+    print(f'  curl -X POST -H "x-api-key: $LANGSMITH_API_KEY" \\')
+    print(f'    "{endpoint}/api/v1/runs/rules/{rule["id"]}/trigger"')
 
 
 if __name__ == "__main__":

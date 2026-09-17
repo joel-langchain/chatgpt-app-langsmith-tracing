@@ -55,7 +55,7 @@ CONVERSATIONS = [
         f"user_{uuid.uuid4().hex[:8]}",
         [
             ("search_holidays", {"destination": "Malaga", "max_price_gbp": 900,
-             "customer_request": "Malaga on a budget, nothing over 1000"}),
+             "customer_request": "Malaga on a budget, nothing over 900"}),
             ("search_holidays", {"destination": "Lisbon", "max_price_gbp": 900,
              "customer_request": "cheapest Lisbon option they have"}),
             ("get_holiday", {"holiday_id": "HOL-9999"}),  # bad id -> tool error, should show as an error run

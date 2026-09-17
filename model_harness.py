@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import uuid
 
 from dotenv import load_dotenv
 
@@ -42,7 +41,6 @@ async def main() -> None:
     set_default_openai_client(
         AsyncOpenAI(base_url=os.environ.get("OPENAI_BASE_URL"), api_key=os.environ["OPENAI_API_KEY"])
     )
-    session = f"harness_{uuid.uuid4().hex[:12]}"
     async with MCPServerStreamableHttp(name="holidays", params={"url": URL}, cache_tools_list=True) as srv:
         agent = Agent(
             name="holidays assistant",
@@ -56,9 +54,10 @@ async def main() -> None:
             result = await Runner.run(agent, q)
             print(f"ASSISTANT {result.final_output[:200]}")
 
-    print(f"\nDone. The tool calls are in your LangSmith project, thread {session} not set on these")
-    print("because the Agents SDK does not send _meta. Look at the arguments on each tool run and")
-    print("you will see customer_request alongside destination, month, and max_price_gbp.")
+    print("\nDone. The tool calls are in your LangSmith project. They carry no session_id, so")
+    print("they are not grouped into a thread, because the Agents SDK does not send _meta the")
+    print("way ChatGPT does. Look at the arguments on each tool run and you will see")
+    print("customer_request alongside destination, month, and max_price_gbp.")
 
 
 if __name__ == "__main__":

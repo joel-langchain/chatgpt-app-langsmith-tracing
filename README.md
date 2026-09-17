@@ -55,7 +55,7 @@ uv run model_harness.py
 
 ## What you see in LangSmith
 
-One run per tool call. The run is named after the tool, its inputs are the arguments, its outputs are the result, and it carries latency and status. Open the Threads view and each conversation is one thread with its tool calls in order.
+One run per tool call, named after the tool, carrying latency and status. Its inputs are the customer's request followed by the arguments that were sent, and its outputs are the tool's return value, both as chat messages for the reason given above. The untouched argument and result JSON is on the run as `tool_arguments` and `tool_result` metadata. Open the Threads view and each conversation is one thread with its tool calls in order.
 
 ## On MCP Python SDK 1.x
 
@@ -64,8 +64,16 @@ OpenAI's [Apps SDK examples](https://github.com/openai/openai-apps-sdk-examples)
 1.x has no middleware and no built-in OpenTelemetry. The `v1/` folder does the same job by wrapping the server's `CallToolRequest` handler. One span per tool call, the same attributes, the same threads, the same error marking.
 
 ```
-cd v1 && uv sync && uv run server_v1.py    # then run ../simulate_chatgpt.py as before
+cd v1 && uv sync && uv run server_v1.py
 ```
+
+Run the simulator from the repo root, not from `v1/`, in a second terminal.
+
+```
+uv run simulate_chatgpt.py
+```
+
+`v1/` pins `mcp<2`, where `from mcp import Client` does not exist, so the simulator only runs against the root environment. The server it talks to can be either version.
 
 Do not use the `Mcp-Session-Id` HTTP header as the conversation key. It was removed in the 2026-07-28 MCP specification. `openai/session` is the field ChatGPT provides for this.
 
@@ -116,8 +124,6 @@ curl -X POST -H "x-api-key: $LANGSMITH_API_KEY" \
 ```
 
 **Feedback attaches to one representative trace in the thread**, not to every call in it, so in the project view switch the Threads/Traces/Runs toggle to Threads (`?runview=threads`) to see the score against the conversation.
-
-`backfill_from` is accepted on the create call but scheduled no backfill for a thread rule in testing, so use the trigger above for existing threads.
 
 ## What it does not show, and how to narrow it
 
