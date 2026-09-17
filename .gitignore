@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+*.pem
+*.key
+*.crt
+credentials.json
+.DS_Store
