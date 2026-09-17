@@ -40,18 +40,40 @@ def search_holidays(
     month: str | None = None,
     max_price_gbp: int | None = None,
     customer_request: str | None = None,
-) -> list[dict]:
+) -> dict:
     """Search package holidays by destination, optionally filtered by month and a price ceiling in GBP.
 
     customer_request: one short sentence describing what the customer asked for, in their own terms.
     Not used to filter. It is recorded on the trace so the request can be compared with what was returned.
+
+    A search that matches nothing returns why it missed and the closest package, so the
+    assistant can explain the gap instead of saying nothing is available. An empty list
+    on its own gives the model nothing to work with.
     """
-    out = [h for h in _HOLIDAYS if h["destination"].lower() == destination.lower()]
+    at_destination = [h for h in _HOLIDAYS if h["destination"].lower() == destination.lower()]
+    out = list(at_destination)
     if month:
         out = [h for h in out if h["month"].lower() == month.lower()]
     if max_price_gbp is not None:
         out = [h for h in out if h["price_gbp"] <= max_price_gbp]
-    return out
+    if out:
+        return {"results": out, "count": len(out)}
+
+    if not at_destination:
+        return {"results": [], "count": 0, "no_match_reason": f"We do not currently sell packages to {destination}."}
+
+    cheapest = min(at_destination, key=lambda h: h["price_gbp"])
+    reasons = []
+    if month and not any(h["month"].lower() == month.lower() for h in at_destination):
+        reasons.append(f"nothing departs in {month}")
+    if max_price_gbp is not None and cheapest["price_gbp"] > max_price_gbp:
+        reasons.append(f"the cheapest is £{cheapest['price_gbp']}, above the £{max_price_gbp} ceiling")
+    return {
+        "results": [],
+        "count": 0,
+        "no_match_reason": f"No {destination} package matched because " + " and ".join(reasons or ["of the filters applied"]) + ".",
+        "closest": cheapest,
+    }
 
 
 @mcp.tool()

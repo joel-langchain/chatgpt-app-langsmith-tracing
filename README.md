@@ -69,6 +69,21 @@ cd v1 && uv sync && uv run server_v1.py    # then run ../simulate_chatgpt.py as 
 
 Do not use the `Mcp-Session-Id` HTTP header as the conversation key. It was removed in the 2026-07-28 MCP specification. `openai/session` is the field ChatGPT provides for this.
 
+## Tool responses shape what the agent can say
+
+`search_holidays` does not return a bare empty list when nothing matches. It returns why the search missed and the closest package it does have.
+
+```json
+{
+  "results": [],
+  "count": 0,
+  "no_match_reason": "No Malaga package matched because the cheapest is \u00a31105, above the \u00a3900 ceiling.",
+  "closest": {"id": "HOL-3305", "destination": "Malaga", "nights": 7, "price_gbp": 1105, "month": "October"}
+}
+```
+
+An empty list gives the model nothing, so the customer gets a dead end. With a reason and a near miss the model can explain the gap and offer the alternative. This matters more for a ChatGPT app than for an agent you run yourself, because the tool response is the only thing you control once the conversation is on OpenAI's side. It is also visible on the trace, so the quality of these responses is something you can evaluate rather than guess at.
+
 ## Evaluating a whole conversation
 
 A run-level evaluator scores one tool call. It cannot answer whether the customer got what they asked for, because a conversation spans several calls and each one may be individually fine. That needs a thread-level evaluator, which reads the assembled conversation instead.
