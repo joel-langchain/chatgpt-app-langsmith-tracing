@@ -87,7 +87,8 @@ def main() -> None:
 
     with httpx.Client(base_url=endpoint, headers=headers, timeout=60) as http:
         sessions = http.get("/api/v1/sessions", params={"name": args.project}).raise_for_status().json()
-        session_id = (sessions if isinstance(sessions, list) else [sessions])[0]["id"]
+        session = (sessions if isinstance(sessions, list) else [sessions])[0]
+        session_id = session["id"]
 
         body = {
             "display_name": args.name,
@@ -110,11 +111,11 @@ def main() -> None:
             ],
         }
         if args.idle_seconds:
-            # The idle window is a project setting shared by every thread rule on it.
-            http.patch(
-                f"/api/v1/sessions/{session_id}",
-                json={"extra": {"thread_idle_seconds": str(max(args.idle_seconds, 120))}},
-            ).raise_for_status()
+            # The idle window is a project setting shared by every thread rule on it. A PATCH
+            # replaces `extra` outright, so merge into whatever the project already holds.
+            extra = dict(session.get("extra") or {})
+            extra["thread_idle_seconds"] = str(max(args.idle_seconds, 120))
+            http.patch(f"/api/v1/sessions/{session_id}", json={"extra": extra}).raise_for_status()
 
         r = http.post("/api/v1/runs/rules", json=body)
         if r.status_code >= 400:
@@ -130,7 +131,7 @@ def main() -> None:
     print("\nA thread is scored once it has been idle. Feedback lands on one representative")
     print("trace per thread, not on every tool call in it, so view it with ?runview=threads.")
     print("\nTo score the threads already in the project, trigger the rule now:")
-    print(f'  curl -X POST -H "x-api-key: $LANGSMITH_API_KEY" \\')
+    print('  curl -X POST -H "x-api-key: $LANGSMITH_API_KEY" \\')
     print(f'    "{endpoint}/api/v1/runs/rules/{rule["id"]}/trigger"')
 
 

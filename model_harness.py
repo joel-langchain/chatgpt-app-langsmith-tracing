@@ -15,7 +15,6 @@ Run (server.py already running, model credentials in the env):
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 
 from dotenv import load_dotenv
@@ -27,7 +26,9 @@ from agents.mcp import MCPServerStreamableHttp  # noqa: E402
 from openai import AsyncOpenAI  # noqa: E402
 
 URL = f"http://{os.environ.get('MCP_HOST', '127.0.0.1')}:{os.environ.get('MCP_PORT', '8765')}/mcp"
-MODEL = os.environ.get("HARNESS_MODEL", "gpt-4o-mini")
+# `or` rather than a get() default, because .env.example ships these keys empty and an
+# empty value is present, not absent.
+MODEL = os.environ.get("HARNESS_MODEL") or "gpt-4o-mini"
 
 # Phrased the way a customer would, with intent the tool parameters cannot hold.
 QUESTIONS = [
@@ -39,7 +40,7 @@ QUESTIONS = [
 async def main() -> None:
     set_tracing_disabled(True)  # the server's own tracing is what we are looking at
     set_default_openai_client(
-        AsyncOpenAI(base_url=os.environ.get("OPENAI_BASE_URL"), api_key=os.environ["OPENAI_API_KEY"])
+        AsyncOpenAI(base_url=os.environ.get("OPENAI_BASE_URL") or None, api_key=os.environ["OPENAI_API_KEY"])
     )
     async with MCPServerStreamableHttp(name="holidays", params={"url": URL}, cache_tools_list=True) as srv:
         agent = Agent(

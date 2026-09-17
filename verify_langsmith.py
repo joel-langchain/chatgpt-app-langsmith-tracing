@@ -19,7 +19,7 @@ project = os.environ["LANGSMITH_PROJECT"]
 client = Client(api_key=os.environ["LANGSMITH_API_KEY"], api_url=os.environ.get("LANGSMITH_ENDPOINT"))
 
 since = datetime.now(timezone.utc) - timedelta(minutes=int(os.environ.get("VERIFY_MINUTES", "30")))
-runs = list(client.list_runs(project_name=project, is_root=True, start_time=since))  # noqa: deprecated in 0.12, fine here
+runs = list(client.list_runs(project_name=project, is_root=True, start_time=since))  # list_runs is deprecated in langsmith 0.12, fine for a read-back
 print(f"{len(runs)} root runs in '{project}' since {since:%H:%M} UTC\n")
 
 by_session: dict[str, list] = defaultdict(list)

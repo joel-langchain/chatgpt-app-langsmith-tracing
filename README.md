@@ -108,7 +108,13 @@ Three things to know.
 
 **Inputs and outputs must carry a top-level `messages` key**, in LangChain, OpenAI, or Anthropic format. Raw MCP arguments do not qualify, and a thread evaluator given traces it cannot assemble produces nothing at all rather than an error. That is why the middleware emits messages.
 
-**It fires when a thread goes idle**, ten minutes by default and two minutes at the least. The setting lives on the project, so it can be changed without the UI.
+**It fires when a thread goes idle**, ten minutes by default and two minutes at the least. The setting lives on the project rather than on the rule, so `--idle-seconds` sets it on the way through and you never need the project id.
+
+```
+uv run create_thread_evaluator.py --idle-seconds 120
+```
+
+The same change by hand, for a project that already has a rule on it. A `PATCH` replaces `extra` outright, so send back any other keys the project holds. The script merges them for you.
 
 ```
 curl -X PATCH -H "x-api-key: $LANGSMITH_API_KEY" -H "Content-Type: application/json" \
