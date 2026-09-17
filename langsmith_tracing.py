@@ -17,6 +17,9 @@ Two pieces.
      what groups the tool calls of one conversation into a LangSmith thread.
    - `langsmith.metadata.user_id` is taken from `_meta["openai/subject"]`, the
      anonymised user id.
+   - `gen_ai.prompt` and `gen_ai.completion` are chat messages rather than the raw
+     argument and result JSON, which is what lets a thread-level evaluator assemble
+     the thread into a conversation. The raw values are kept as metadata.
 
 The `_meta` field names come from the Apps SDK reference:
 https://developers.openai.com/apps-sdk/reference
@@ -113,10 +116,17 @@ async def langsmith_middleware(ctx: ServerRequestContext, call_next: CallNext) -
     arguments = params.get("arguments") or {}
     meta = dict(ctx.meta or {})
 
+    # Inputs and outputs are shaped as chat messages, not raw arguments. Thread-level
+    # evaluators assemble a conversation from the traces in a thread and require a
+    # top-level `messages` key on both sides; without it they silently never run.
+    # The customer_request argument is the nearest thing to a user turn, and the tool
+    # result is the reply. Raw arguments stay on the run as metadata.
+    user_text = arguments.get("customer_request") or f"called {tool_name} with {json.dumps(arguments, default=str)}"
     attrs: dict[str, Any] = {
         "langsmith.span.kind": "tool",
         "langsmith.span.tags": "chatgpt-app,mcp",
-        "gen_ai.prompt": json.dumps(arguments, ensure_ascii=False, default=str),
+        "gen_ai.prompt": json.dumps({"messages": [{"role": "user", "content": user_text}]}, ensure_ascii=False, default=str),
+        "langsmith.metadata.tool_arguments": json.dumps(arguments, ensure_ascii=False, default=str),
     }
     if isinstance(tool_name, str):
         attrs["langsmith.trace.name"] = tool_name
@@ -132,7 +142,13 @@ async def langsmith_middleware(ctx: ServerRequestContext, call_next: CallNext) -
         payload = _to_jsonable(result)
         if isinstance(payload, dict):
             payload = {k: v for k, v in payload.items() if k != "_meta"}  # serverInfo stamp, not output
-        span.set_attribute("gen_ai.completion", json.dumps(payload, ensure_ascii=False, default=str))
+        texts = [c.get("text", "") for c in (payload.get("content") or []) if isinstance(c, dict)]
+        reply = "\n".join(t for t in texts if t) or json.dumps(payload, default=str)
+        span.set_attribute(
+            "gen_ai.completion",
+            json.dumps({"messages": [{"role": "assistant", "content": reply}]}, ensure_ascii=False, default=str),
+        )
+        span.set_attribute("langsmith.metadata.tool_result", json.dumps(payload, ensure_ascii=False, default=str))
 
         # A tool that failed comes back as a normal result with isError=true. The SDK's
         # own span sets an error status, but LangSmith's OTel ingest marks a run as

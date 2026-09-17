@@ -81,6 +81,9 @@ def trace_tool_calls(mcp: FastMCP) -> None:
         arguments = req.params.arguments or {}
         meta = _meta_dict(req.params)
 
+        # Messages rather than raw arguments, so thread-level evaluators can assemble
+        # the thread. See the note in the v2 module for why.
+        user_text = arguments.get("customer_request") or f"called {name} with {json.dumps(arguments, default=str)}"
         attrs: dict[str, Any] = {
             "mcp.method.name": "tools/call",
             "gen_ai.operation.name": "execute_tool",
@@ -88,7 +91,8 @@ def trace_tool_calls(mcp: FastMCP) -> None:
             "langsmith.span.kind": "tool",
             "langsmith.trace.name": name,
             "langsmith.span.tags": "chatgpt-app,mcp,sdk-v1",
-            "gen_ai.prompt": json.dumps(arguments, ensure_ascii=False, default=str),
+            "gen_ai.prompt": json.dumps({"messages": [{"role": "user", "content": user_text}]}, ensure_ascii=False, default=str),
+            "langsmith.metadata.tool_arguments": json.dumps(arguments, ensure_ascii=False, default=str),
         }
         for wire_key, ls_key in _META_MAP.items():
             value = meta.get(wire_key)
@@ -100,7 +104,13 @@ def trace_tool_calls(mcp: FastMCP) -> None:
             try:
                 payload = result.root.model_dump(by_alias=True, mode="json", exclude_none=True)
                 payload.pop("_meta", None)
-                span.set_attribute("gen_ai.completion", json.dumps(payload, ensure_ascii=False, default=str))
+                texts = [c.get("text", "") for c in (payload.get("content") or []) if isinstance(c, dict)]
+                reply = "\n".join(t for t in texts if t) or json.dumps(payload, default=str)
+                span.set_attribute(
+                    "gen_ai.completion",
+                    json.dumps({"messages": [{"role": "assistant", "content": reply}]}, ensure_ascii=False, default=str),
+                )
+                span.set_attribute("langsmith.metadata.tool_result", json.dumps(payload, ensure_ascii=False, default=str))
                 if payload.get("isError") is True:
                     message = " ".join(c.get("text", "") for c in payload.get("content", []) if isinstance(c, dict)).strip()
                     span.add_event("exception", {"exception.type": "ToolError", "exception.message": message or "tool error"})

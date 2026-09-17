@@ -9,6 +9,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.30",
     "python-dotenv>=1.0",
     "langsmith>=0.4",
+    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]

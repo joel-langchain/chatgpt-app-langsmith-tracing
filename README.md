@@ -19,8 +19,8 @@ This example traces every tool call into LangSmith as one run, with the argument
 |---|---|
 | `langsmith.span.kind` | `tool` |
 | `langsmith.trace.name` | the tool name |
-| `gen_ai.prompt` | the arguments, as JSON |
-| `gen_ai.completion` | the result, as JSON |
+| `gen_ai.prompt` | a `messages` list, the customer's request as a user turn |
+| `gen_ai.completion` | a `messages` list, the tool result as an assistant turn |
 | `langsmith.metadata.session_id` | `_meta["openai/session"]`, which forms the thread |
 | `langsmith.metadata.user_id` | `_meta["openai/subject"]` |
 
@@ -31,6 +31,8 @@ Two details the middleware handles.
 The SDK also spans `initialize`, `tools/list`, and `server/discover`. ChatGPT sends those constantly and they carry no conversation id, so the exporter drops everything except `tools/call`.
 
 A tool that fails returns a normal result with `isError: true`. LangSmith marks a run as failed from an `exception` event, so the middleware adds one carrying the error text ChatGPT received. Without it a failed tool call looks successful.
+
+Inputs and outputs are chat messages rather than the raw argument and result JSON. That is a requirement of thread-level evaluation, covered below. The raw values are kept on the run as `tool_arguments` and `tool_result` metadata, so nothing is lost.
 
 ## Run it
 
@@ -67,6 +69,33 @@ cd v1 && uv sync && uv run server_v1.py    # then run ../simulate_chatgpt.py as 
 
 Do not use the `Mcp-Session-Id` HTTP header as the conversation key. It was removed in the 2026-07-28 MCP specification. `openai/session` is the field ChatGPT provides for this.
 
+## Evaluating a whole conversation
+
+A run-level evaluator scores one tool call. It cannot answer whether the customer got what they asked for, because a conversation spans several calls and each one may be individually fine. That needs a thread-level evaluator, which reads the assembled conversation instead.
+
+`create_thread_evaluator.py` creates one from code.
+
+```
+uv run create_thread_evaluator.py --project chatgpt-app-tracing
+```
+
+It posts a rule with `group_by: "thread_id"`, which is the field that makes it a thread evaluator, and an inline LLM-as-judge whose prompt receives the assembled conversation as `all_messages`. The UI creates the judge as a Prompt Hub reference instead, so a rule made here reads slightly differently from one made by hand, but it behaves the same.
+
+Three things to know.
+
+**Inputs and outputs must carry a top-level `messages` key**, in LangChain, OpenAI, or Anthropic format. Raw MCP arguments do not qualify, and a thread evaluator given traces it cannot assemble produces nothing at all rather than an error. That is why the middleware emits messages.
+
+**It fires when a thread goes idle**, ten minutes by default and two minutes at the least, set per project in the UI. To see a result immediately, trigger the rule by hand.
+
+```
+curl -X POST -H "x-api-key: $LANGSMITH_API_KEY" \
+  "$LANGSMITH_ENDPOINT/api/v1/runs/rules/<rule_id>/trigger"
+```
+
+**Feedback attaches to one representative trace in the thread**, not to every call in it, so in the project view switch the Threads/Traces/Runs toggle to Threads (`?runview=threads`) to see the score against the conversation.
+
+`backfill_from` is accepted on the create call but scheduled no backfill for a thread rule in testing, so use the trigger above for existing threads.
+
 ## What it does not show, and how to narrow it
 
 The user's question, ChatGPT's reasoning between calls, and the final answer stay on OpenAI's side and never reach your server. Two ways to narrow that.
@@ -96,4 +125,5 @@ It is the model's paraphrase rather than a transcript, so treat it as evidence a
 | `simulate_chatgpt.py` | Calls the server with the `_meta` ChatGPT would send |
 | `verify_langsmith.py` | Reads the runs back and prints them by thread |
 | `model_harness.py` | Drives the server with a real model, to see what it writes into `customer_request` |
+| `create_thread_evaluator.py` | Creates a thread-level LLM-as-judge evaluator on a project |
 | `v1/` | The same server and tracing on MCP Python SDK 1.x |
