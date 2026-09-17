@@ -60,6 +60,34 @@ def setup_langsmith_tracing(service_name: str = "holidays-mcp-v1") -> TracerProv
     return provider
 
 
+def _as_messages(tool_name: str, arguments: dict, payload: Any | None = None) -> tuple[str, str | None]:
+    """Render a tool call as a user turn and its result as an assistant turn.
+
+    Same shape as the v2 module. The user turn carries the customer's own words and the
+    arguments that were sent, so a judge has the intent and a person debugging has the
+    parameters. The assistant turn carries the tool's own return value rather than the
+    MCP envelope, since isError and resultType are already on the run.
+    """
+    request = arguments.get("customer_request")
+    rest = {k: v for k, v in arguments.items() if k != "customer_request"}
+    params = ", ".join(f"{k}={v!r}" for k, v in rest.items())
+    if request:
+        user_text = f"{request}\n\n{tool_name}({params})" if params else f"{request}\n\n{tool_name}()"
+    else:
+        user_text = f"{tool_name}({params})"
+
+    if payload is None:
+        return user_text, None
+
+    structured = payload.get("structuredContent") if isinstance(payload, dict) else None
+    if isinstance(structured, dict) and "result" in structured:
+        reply = json.dumps(structured["result"], ensure_ascii=False, indent=2, default=str)
+    else:
+        texts = [c.get("text", "") for c in (payload.get("content") or []) if isinstance(c, dict)]
+        reply = "\n".join(t for t in texts if t) or json.dumps(payload, ensure_ascii=False, default=str)
+    return user_text, reply
+
+
 def _meta_dict(params: types.CallToolRequestParams) -> dict[str, Any]:
     """`_meta` as a plain dict. 1.x models it as RequestParams.Meta with extra='allow',
     so ChatGPT's `openai/*` keys land in model_extra."""
@@ -83,7 +111,7 @@ def trace_tool_calls(mcp: FastMCP) -> None:
 
         # Messages rather than raw arguments, so thread-level evaluators can assemble
         # the thread. See the note in the v2 module for why.
-        user_text = arguments.get("customer_request") or f"called {name} with {json.dumps(arguments, default=str)}"
+        user_text, _ = _as_messages(name, arguments)
         attrs: dict[str, Any] = {
             "mcp.method.name": "tools/call",
             "gen_ai.operation.name": "execute_tool",
@@ -104,8 +132,7 @@ def trace_tool_calls(mcp: FastMCP) -> None:
             try:
                 payload = result.root.model_dump(by_alias=True, mode="json", exclude_none=True)
                 payload.pop("_meta", None)
-                texts = [c.get("text", "") for c in (payload.get("content") or []) if isinstance(c, dict)]
-                reply = "\n".join(t for t in texts if t) or json.dumps(payload, default=str)
+                _, reply = _as_messages(name, arguments, payload)
                 span.set_attribute(
                     "gen_ai.completion",
                     json.dumps({"messages": [{"role": "assistant", "content": reply}]}, ensure_ascii=False, default=str),

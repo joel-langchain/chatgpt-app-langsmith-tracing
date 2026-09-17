@@ -19,8 +19,8 @@ This example traces every tool call into LangSmith as one run, with the argument
 |---|---|
 | `langsmith.span.kind` | `tool` |
 | `langsmith.trace.name` | the tool name |
-| `gen_ai.prompt` | a `messages` list, the customer's request as a user turn |
-| `gen_ai.completion` | a `messages` list, the tool result as an assistant turn |
+| `gen_ai.prompt` | a `messages` list, the customer's request and the arguments sent |
+| `gen_ai.completion` | a `messages` list, the tool's own return value |
 | `langsmith.metadata.session_id` | `_meta["openai/session"]`, which forms the thread |
 | `langsmith.metadata.user_id` | `_meta["openai/subject"]` |
 
@@ -32,7 +32,7 @@ The SDK also spans `initialize`, `tools/list`, and `server/discover`. ChatGPT se
 
 A tool that fails returns a normal result with `isError: true`. LangSmith marks a run as failed from an `exception` event, so the middleware adds one carrying the error text ChatGPT received. Without it a failed tool call looks successful.
 
-Inputs and outputs are chat messages rather than the raw argument and result JSON. That is a requirement of thread-level evaluation, covered below. The raw values are kept on the run as `tool_arguments` and `tool_result` metadata, so nothing is lost.
+Inputs and outputs are chat messages rather than the raw argument and result JSON, which is a requirement of thread-level evaluation, covered below. Two readers need different things from those messages, so the user turn carries the customer's own words followed by the arguments that were actually sent, and the assistant turn carries the tool's own return value rather than the MCP envelope around it. A judge gets the intent, and anyone debugging still sees the parameters. The untouched argument and result JSON is on the run as `tool_arguments` and `tool_result` metadata either way.
 
 ## Run it
 
@@ -85,7 +85,15 @@ Three things to know.
 
 **Inputs and outputs must carry a top-level `messages` key**, in LangChain, OpenAI, or Anthropic format. Raw MCP arguments do not qualify, and a thread evaluator given traces it cannot assemble produces nothing at all rather than an error. That is why the middleware emits messages.
 
-**It fires when a thread goes idle**, ten minutes by default and two minutes at the least, set per project in the UI. To see a result immediately, trigger the rule by hand.
+**It fires when a thread goes idle**, ten minutes by default and two minutes at the least. The setting lives on the project, so it can be changed without the UI.
+
+```
+curl -X PATCH -H "x-api-key: $LANGSMITH_API_KEY" -H "Content-Type: application/json" \
+  "$LANGSMITH_ENDPOINT/api/v1/sessions/<project_id>" \
+  -d '{"extra": {"thread_idle_seconds": "120"}}'
+```
+
+To see a result without waiting at all, trigger the rule by hand.
 
 ```
 curl -X POST -H "x-api-key: $LANGSMITH_API_KEY" \

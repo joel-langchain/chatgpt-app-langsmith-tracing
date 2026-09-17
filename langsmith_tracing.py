@@ -17,9 +17,11 @@ Two pieces.
      what groups the tool calls of one conversation into a LangSmith thread.
    - `langsmith.metadata.user_id` is taken from `_meta["openai/subject"]`, the
      anonymised user id.
-   - `gen_ai.prompt` and `gen_ai.completion` are chat messages rather than the raw
-     argument and result JSON, which is what lets a thread-level evaluator assemble
-     the thread into a conversation. The raw values are kept as metadata.
+   - `gen_ai.prompt` and `gen_ai.completion` are chat messages, which is what lets a
+     thread-level evaluator assemble the thread into a conversation. The user turn
+     carries the customer's words and the arguments that were sent; the assistant
+     turn carries the tool's own return value. The raw argument and result JSON is
+     kept on the run as metadata either way.
 
 The `_meta` field names come from the Apps SDK reference:
 https://developers.openai.com/apps-sdk/reference
@@ -99,6 +101,37 @@ def setup_langsmith_tracing(service_name: str = "holidays-mcp") -> TracerProvide
     return provider
 
 
+def _as_messages(tool_name: str, arguments: dict, payload: Any | None = None) -> tuple[str, str | None]:
+    """Render a tool call as a user turn and its result as an assistant turn.
+
+    Thread-level evaluators assemble a conversation from the traces in a thread and
+    need a top-level `messages` key on inputs and outputs. Two things matter in what
+    goes into those messages. A judge needs the customer's own words, and a person
+    debugging needs the arguments that were actually sent, so the user turn carries
+    both. The assistant turn carries the tool's own payload rather than the MCP
+    envelope around it, because `isError` and `resultType` are on the run already.
+    """
+    request = arguments.get("customer_request")
+    rest = {k: v for k, v in arguments.items() if k != "customer_request"}
+    params = ", ".join(f"{k}={v!r}" for k, v in rest.items())
+    if request:
+        user_text = f"{request}\n\n{tool_name}({params})" if params else f"{request}\n\n{tool_name}()"
+    else:
+        user_text = f"{tool_name}({params})"
+
+    if payload is None:
+        return user_text, None
+
+    # Prefer the tool's own return value, then its text blocks, then the envelope.
+    structured = payload.get("structuredContent") if isinstance(payload, dict) else None
+    if isinstance(structured, dict) and "result" in structured:
+        reply = json.dumps(structured["result"], ensure_ascii=False, indent=2, default=str)
+    else:
+        texts = [c.get("text", "") for c in (payload.get("content") or []) if isinstance(c, dict)]
+        reply = "\n".join(t for t in texts if t) or json.dumps(payload, ensure_ascii=False, default=str)
+    return user_text, reply
+
+
 def _to_jsonable(result: HandlerResult) -> Any:
     if isinstance(result, BaseModel):
         return result.model_dump(by_alias=True, mode="json", exclude_none=True)
@@ -121,7 +154,7 @@ async def langsmith_middleware(ctx: ServerRequestContext, call_next: CallNext) -
     # top-level `messages` key on both sides; without it they silently never run.
     # The customer_request argument is the nearest thing to a user turn, and the tool
     # result is the reply. Raw arguments stay on the run as metadata.
-    user_text = arguments.get("customer_request") or f"called {tool_name} with {json.dumps(arguments, default=str)}"
+    user_text, _ = _as_messages(str(tool_name), arguments)
     attrs: dict[str, Any] = {
         "langsmith.span.kind": "tool",
         "langsmith.span.tags": "chatgpt-app,mcp",
@@ -142,8 +175,7 @@ async def langsmith_middleware(ctx: ServerRequestContext, call_next: CallNext) -
         payload = _to_jsonable(result)
         if isinstance(payload, dict):
             payload = {k: v for k, v in payload.items() if k != "_meta"}  # serverInfo stamp, not output
-        texts = [c.get("text", "") for c in (payload.get("content") or []) if isinstance(c, dict)]
-        reply = "\n".join(t for t in texts if t) or json.dumps(payload, default=str)
+        _, reply = _as_messages(str(tool_name), arguments, payload)
         span.set_attribute(
             "gen_ai.completion",
             json.dumps({"messages": [{"role": "assistant", "content": reply}]}, ensure_ascii=False, default=str),
