@@ -43,7 +43,8 @@ CONVERSATIONS = [
         f"conv_{uuid.uuid4().hex[:12]}",
         f"user_{uuid.uuid4().hex[:8]}",
         [
-            ("search_holidays", {"destination": "Lisbon", "month": "October"}),
+            ("search_holidays", {"destination": "Lisbon", "month": "October",
+             "customer_request": "a week in Lisbon in October, somewhere warm"}),
             ("get_holiday", {"holiday_id": "HOL-2210"}),
             ("check_availability", {"holiday_id": "HOL-2210", "departure_date": "2026-10-14"}),
             ("check_availability", {"holiday_id": "HOL-2210", "departure_date": "2026-10-18"}),
@@ -53,8 +54,10 @@ CONVERSATIONS = [
         f"conv_{uuid.uuid4().hex[:12]}",
         f"user_{uuid.uuid4().hex[:8]}",
         [
-            ("search_holidays", {"destination": "Malaga", "max_price_gbp": 900}),
-            ("search_holidays", {"destination": "Lisbon", "max_price_gbp": 900}),
+            ("search_holidays", {"destination": "Malaga", "max_price_gbp": 900,
+             "customer_request": "Malaga on a budget, nothing over 1000"}),
+            ("search_holidays", {"destination": "Lisbon", "max_price_gbp": 900,
+             "customer_request": "cheapest Lisbon option they have"}),
             ("get_holiday", {"holiday_id": "HOL-9999"}),  # bad id -> tool error, should show as an error run
         ],
     ),

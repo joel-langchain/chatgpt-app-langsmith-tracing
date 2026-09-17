@@ -35,8 +35,17 @@ _HOLIDAYS = [
 
 
 @mcp.tool()
-def search_holidays(destination: str, month: str | None = None, max_price_gbp: int | None = None) -> list[dict]:
-    """Search package holidays by destination, optionally filtered by month and a price ceiling in GBP."""
+def search_holidays(
+    destination: str,
+    month: str | None = None,
+    max_price_gbp: int | None = None,
+    customer_request: str | None = None,
+) -> list[dict]:
+    """Search package holidays by destination, optionally filtered by month and a price ceiling in GBP.
+
+    customer_request: one short sentence describing what the customer asked for, in their own terms.
+    Not used to filter. It is recorded on the trace so the request can be compared with what was returned.
+    """
     out = [h for h in _HOLIDAYS if h["destination"].lower() == destination.lower()]
     if month:
         out = [h for h in out if h["month"].lower() == month.lower()]

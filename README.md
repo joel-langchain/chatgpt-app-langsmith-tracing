@@ -42,6 +42,13 @@ uv run simulate_chatgpt.py  # terminal 2, calls the server the way ChatGPT does
 uv run verify_langsmith.py  # reads the runs back, grouped by thread
 ```
 
+To drive the same server with a real model instead of the simulator, which is how to check what a model writes into `customer_request`, add the harness extra and give it model credentials.
+
+```
+uv sync --extra harness
+uv run model_harness.py
+```
+
 `simulate_chatgpt.py` plays two conversations from two users, several tool calls each, with the `_meta` ChatGPT would send. The last call uses a bad id so one run shows as an error.
 
 ## What you see in LangSmith
@@ -60,13 +67,25 @@ cd v1 && uv sync && uv run server_v1.py    # then run ../simulate_chatgpt.py as 
 
 Do not use the `Mcp-Session-Id` HTTP header as the conversation key. It was removed in the 2026-07-28 MCP specification. `openai/session` is the field ChatGPT provides for this.
 
-## What it does not show
+## What it does not show, and how to narrow it
 
-The user's question, ChatGPT's reasoning between calls, and the final answer stay on OpenAI's side and never reach your server. Two ways to close part of that gap.
+The user's question, ChatGPT's reasoning between calls, and the final answer stay on OpenAI's side and never reach your server. Two ways to narrow that.
 
-Add a field to the tool schema, for example `customer_request`, a one line summary of what the user asked. ChatGPT fills in whatever the schema asks for, so the summary arrives with the arguments and lands in the trace. It is the model's paraphrase, not a transcript.
+**Ask the schema for it.** A model fills in whatever a tool's schema asks for, so a field that your tool logic ignores still arrives with the arguments and lands on the trace. `search_holidays` here takes a `customer_request` string described as one short sentence covering what the customer asked for. `model_harness.py` drives the server with a real model whose instructions say nothing about that field, and the model populates it from the schema alone.
 
-When the reasoning moves onto a runtime you own, trace that runtime and the tool call becomes one step inside a full trace.
+```
+search_holidays  {"destination": "Lisbon", "month": "October", "max_price_gbp": 900}
+  customer_request -> 'week in Lisbon under 900 pounds'
+
+search_holidays  {"destination": "Reykjavik", "month": "November"}
+  customer_request -> 'short break to see the northern lights'
+```
+
+The second one is the point. Northern lights appears in none of the structured arguments, so that intent would otherwise be invisible, and on the trace it becomes something an evaluator can judge the returned holiday against.
+
+It is the model's paraphrase rather than a transcript, so treat it as evidence and not a record. It also means you are capturing conversation content your tool does not need, which is worth a look from whoever owns data handling before it goes near production.
+
+**Move the reasoning onto your own runtime.** Trace that runtime and the tool call becomes one step inside a full trace rather than the whole of it.
 
 ## Files
 
@@ -76,4 +95,5 @@ When the reasoning moves onto a runtime you own, trace that runtime and the tool
 | `langsmith_tracing.py` | Exporter setup, the `tools/call` filter, and the middleware |
 | `simulate_chatgpt.py` | Calls the server with the `_meta` ChatGPT would send |
 | `verify_langsmith.py` | Reads the runs back and prints them by thread |
+| `model_harness.py` | Drives the server with a real model, to see what it writes into `customer_request` |
 | `v1/` | The same server and tracing on MCP Python SDK 1.x |

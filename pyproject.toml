@@ -10,3 +10,6 @@ dependencies = [
     "python-dotenv>=1.0",
     "langsmith>=0.4",
 ]
+
+[project.optional-dependencies]
+harness = ["openai-agents>=0.22"]
